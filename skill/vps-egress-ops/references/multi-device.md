@@ -1,63 +1,83 @@
-# Multi-device: decision rules
+# 多设备：一个订阅，几个客户端
 
-Human walkthrough with commands: [docs/05-multi-device.md](../../../docs/05-multi-device.md).
+把一个配置发给手机、笔记本、平板，听起来简单，实际是支持时间消耗最多的地方。故障通常不在代理，而在订阅、客户端或规则集体积。
 
-## One source of truth
+## 只保留一个真相来源
 
-One file, one URL, every device. Do not fork a "phone version" to work around a client problem — that turns one bug into two configs that drift.
+一个文件，一个 URL，所有设备共用。除非真的存在不兼容，不要维护"手机版"和"电脑版"。
 
-If a device cannot load the shared file, that is a client diagnosis, not a reason to split.
+```
+/srv/clash/<token>.yaml   ← 唯一的配置
+        │
+        ├── HTTPS (gzip)  → 设备 A
+        ├── HTTPS (gzip)  → 设备 B
+        └── HTTPS (gzip)  → 设备 C
+```
 
-## What must not be in a shared subscription
+好处：改节点只有一个地方，只有一个哈希要核对，不会漂移。某设备加载不了，那是要诊断的客户端问题，不是分叉配置的理由。
 
-Absolute paths, a specific interface name, hardcoded CDN edge IPs, `tun`/DNS/`hosts` blocks, a local controller port. Each is device-specific and breaks portability.
+## 不要放进共享订阅的东西
 
-Keep the shared file portable; let each device set its own DNS/TUN.
+| 不要包含 | 原因 |
+| --- | --- |
+| 绝对文件路径 | 只在写它的那台机器上有效 |
+| 具体网卡名（`en0`、`eth0`） | 设备相关 |
+| 写死的 CDN 边缘 IP | 会变；用域名 |
+| `tun`、DNS、`hosts` 设置 | 各平台各客户端都不同 |
+| 本地控制端口 | 会和客户端自己的冲突 |
 
-## Ruleset size
+共享文件保持可移植，让每台设备自己设 DNS/TUN。
 
-A ruleset assembled from public sources can reach ~120k entries / ~2.5 MB. On a phone with a memory ceiling this is a **plausible** cause of a blank node list — **plausible, not established**. Do not assert it without client-side evidence.
+## 规则集要小到能被加载
 
-What is safe to say and do:
+从几个公开来源拼出来的规则集可以到约 12 万条、约 2.5 MB YAML。桌面端无所谓。手机上，如果客户端有内存上限，这是"节点列表空白"或"加载失败"的一个可能原因。是可能，不是定论。没有客户端侧证据就不要当成原因。
 
-- gzip cuts fetch time substantially (measured ~180 s → ~42 s for ~2.5 MB → ~560 KB). Affects download only, never proxy throughput.
-- Compiled rulesets (Mihomo MRS) load far faster than equivalent YAML for large sets.
-- Merge groups that point at the same exit. Fewer groups, fewer per-device mistakes.
-- **Never** put `REJECT` first in a service selection group: a fresh device inherits it and silently blocks everything.
+无论如何都可以做的：
 
-## Diagnose "loads but node list is empty" in this order
+- 用 gzip 提供。约 2.5 MB 压到约 560 KB，实测拉取时间从约 180 秒降到约 42 秒。只影响下载，永远不影响代理吞吐。
+- 优先用编译后的规则集。Mihomo 的 MRS 是二进制格式，大集合加载比等价 YAML 快得多。
+- 合并没有理由存在的分组。如果 "Google"、"Gemini"、"Antigravity" 都指向同一个出口，它们就是一个组。
+- 永远不要把 `REJECT` 放在服务选择组的第一位。没有选择缓存的新设备会继承第一项，静默断网非常难查。
 
-1. Fetch the URL with the client's User-Agent from a normal network → is the server serving it intact?
-2. Timeout vs parse error → network vs content/compatibility.
-3. Does the client apply its own override? Inspect the client's **effective** config, not the server file. An override can inject fields the server never sent.
-4. Retry with a trimmed ruleset → is size the variable? (diagnostic, not a shipped variant)
-5. Same device and network, different client → is it that specific client?
+## 诊断"订阅拉下来了但节点列表空白"
 
-Only then name the failing layer.
+这是客户端侧症状，有几种可能。改服务器之前先区分：
 
-Do not conclude "client is broken" from one failure, or "config is fine" because a desktop fetched it. A desktop fetching successfully does not prove a phone can load it.
+1. 下载成功了吗？用客户端的 User-Agent、在普通网络下拉一次。完整返回 YAML → 服务器没问题。
+2. 是拉取失败还是解析失败？超时是网络；带解析报错的加载失败是内容或兼容性。
+3. 客户端是不是自己叠了覆写？有些客户端会在订阅之上合并全局脚本或配置。那个覆写可能注入了服务器根本没发的字段。这时要看客户端实际生效的配置，不是服务器上的文件。
+4. 规则集对这个客户端是不是太大了？用裁剪版测一次，看体积是不是变量。这是诊断手段，不是要发布的版本。
+5. 同设备同网络，换个客户端行不行？行 → 问题是那个特定客户端。
 
-## Selection semantics
+做完这些才能说故障在哪。
 
-`select` is manual and does not fail over. If the user expects automatic fallback they need `url-test` or `fallback`, and must accept that the exit may change silently. State which behavior the subscription provides.
+不要从一次失败断定"客户端坏了"，也不要因为另一台设备拉取成功就断定"配置没问题"。桌面端能拉，不代表手机能加载。
 
-**Several groups pointing at one node is not redundancy.** With one exit, every group resolves to that exit.
+## 选择组和预期管理
 
-## Adding a second entry
+`select` 组是手动的，不会自动故障切换。
 
-- New imports default to whichever entry measures better on the user's network — measure, do not assume.
-- Existing devices may keep their previous selection; tell the user to switch manually.
-- Keep the old entry working until the new one is verified from a real device.
+如果用户期待自动回退，需要 `url-test` 或 `fallback`，并且必须接受出口可能静默改变。说清楚这个订阅提供的是哪种行为。
 
-## Output contract
+还要明确：几个组指向同一个节点不是冗余。只有一个出口时，每个组都解析到那个出口。
 
-```text
-SUBSCRIPTION_URL=<redacted>  SIZE_RAW=<bytes>  SIZE_GZIP=<bytes>
-FETCH_FROM_OUTSIDE=<status> <seconds>  SHA256=<hash>
-PROXIES=<n> GROUPS=<n> RULESET_ENTRIES=<n>
-DEVICE_A=<client+version> <result>
-DEVICE_B=<client+version> <result>
-FAILING_LAYER=<server|download|client parse|client override|ruleset size|undetermined>
-PORTABILITY_EXCLUSIONS=<what you deliberately left out>
-UNVERIFIED=<devices or networks not tested>
+## 以后加第二个入口
+
+- 新导入应该默认选用户网络上实测更好的那个，先测，不要假设；
+- 已有设备可能保留上次的选择，要告诉用户手动切换；
+- 旧入口保持可用，直到新入口在真实设备上验证通过。
+
+## 报告
+
+```
+订阅URL=<脱敏>                 # token 是凭据
+原始大小=<字节>  gzip后=<字节>
+外部拉取=<状态码> <秒数>
+SHA256=<哈希>
+节点数=<n>  组数=<n>  规则条目=<n>
+设备A=<客户端+版本> <结果>
+设备B=<客户端+版本> <结果>
+失败层=<服务器 | 下载 | 客户端解析 | 客户端覆写 | 规则集体积 | 未确定>
+可移植性排除=<你刻意没放进去的东西>
+未验证=<没测的设备或网络>
 ```

@@ -1,80 +1,142 @@
-# Slow path: decision rules
+# 慢：先定位瓶颈，再动手调
 
-Human walkthrough with commands: [docs/02-slow.md](../../../docs/02-slow.md).
+"慢"不是诊断结论。它至少是五种完全不同的故障，用户感觉起来一样。按成本从低到高逐项排除。
 
-## Order is mandatory
-
-Do not skip to tuning. Each step can end the investigation, and the cheap steps rule out the most common wrong guesses.
+## 判断树
 
 ```
-1. VPS → internet speed          rules out "server too weak"
-2. single stream vs N parallel   rules out / confirms capacity
-3. RTT + loss on the real path   explains the mechanism
-4. TCP state (cwnd/retrans)      confirms it is not misconfiguration
-   ↓ only now consider treatment
+用户说：慢
+  │
+  ├─ VPS 自己快不快？            → 从 VPS 直接测到公网
+  │    不快 → 服务器上行 / 服务商 / 硬件问题
+  │    快 ↓
+  │
+  ├─ 单流慢，但多流加起来正常？
+  │    是 → 拥塞控制 / 路径丢包        ← 调优可能有效
+  │    否 ↓
+  │
+  ├─ 全天都慢吗？
+  │    不是 → 高峰期限速，调优解决不了容量
+  │    是 ↓
+  │
+  └─ 是不是客户端自己的网络到头了？   → 换个网络重测
 ```
 
-## The one measurement that decides the branch
+顺序是强制的。每一步都可能直接结案，而且便宜的那几步能排除最常见的错误猜测。
 
-Single stream vs N parallel streams, same object, same moment.
+## 第一步：服务器自己快不快
 
-- **single ≈ total/N** → capacity exists; one flow is throttled → congestion control is a legitimate lever.
-- **single ≈ total** → path is capped → **no amount of tuning adds capacity.**
+从 VPS 测到附近、连接良好的目标，不要测到用户。
 
-Report both numbers. A single-stream figure alone misleads.
+```bash
+curl -o /dev/null -w '%{speed_download} B/s\n' \
+  'https://speed.cloudflare.com/__down?bytes=10000000'
+ip -s link show
+```
 
-## Treatment rules
+怎么读：几十 MB/s 且 errors/drops 为 0，说明服务器上行不是瓶颈。用户看到的低速度发生在路径上，不在机器上。
 
-| Treatment | Only when | What it cannot do |
+这一步排除最常见的错误猜测："VPS 太弱 / 服务商超售"。
+
+## 第二步：单流 vs 多流
+
+整个流程里信息量最大的一次测量，也是唯一能决定该不该调优的测量。
+
+同一个文件下载两次：一次单流，一次 N 条并行。
+
+- 单流 ≈ 多流总量 / N → 链路有容量，单条流被压制。拥塞控制、丢包或限速。调优有意义。
+- 单流 ≈ 多流总量 → 路径本身被限死。加并发没用，调优也没用。
+
+实测过的一种情况：单流约 15 KB/s，四条并行合计约 51 KB/s。容量存在，是一条流被惩罚了。
+
+两个数字都要记。只报单流数字，会把人引向错误的修法。
+
+## 第三步：测真实路径的 RTT 和丢包
+
+```bash
+ping -c 30 <vps>
+mtr -rwzc 30 <vps>     # 如果有
+```
+
+- RTT：决定带宽时延积。约 195 ms 意味着长路径，窗口增长很慢。
+- 丢包：5%–20% 的间歇丢包会打垮基于丢包的拥塞算法。这是长路径上单流速度极低的最常见原因。
+- 丢包从哪一跳开始：只在最后一跳出现，往往是 ICMP 限速而不是真丢包。要用 TCP 侧证据确认。
+
+跨境家宽线路同时出现高 RTT 和间歇丢包很常见。这是路径属性，不是配置错误。
+
+## 第四步：用 TCP 状态确认
+
+光看吞吐分不清"路径差"和"服务器配错"。传输过程中在 VPS 上采样真实连接：
+
+```bash
+ss -tin dst <客户端IP>
+```
+
+| 字段 | 小/大意味着什么 |
+| --- | --- |
+| `cwnd` | 传输中只有 1–3 MSS，说明窗口塌了，原因是丢包或限速 |
+| `ssthresh` | 掉到 2，说明反复发生丢包事件 |
+| `retrans` / `bytes_retrans` | 比例高（如约 15%）确认真实丢包，不只是延迟 |
+| `rtt` | 和 ping 不一致说明中间有东西在拦截 |
+| delivery rate | 服务器上行正常但它极低 → 路径问题 |
+
+这一步把"感觉慢"变成"在 195 ms 路径上，窗口塌到 1–3 MSS，重传率约 15%"。后者可操作，前者不可操作。
+
+## 处理手段（只在第一到四步指向路径之后）
+
+| 手段 | 什么时候用 | 做不到什么 |
 | --- | --- | --- |
-| Congestion control (BBR) | Step 2 shows single-flow throttling on a lossy, high-RTT path | Create capacity; fix the client→VPS segment; guarantee upload gains |
-| CDN-fronted entry | The client→VPS segment is the bottleneck and transport is HTTP-family | Change the exit IP; guarantee a speedup; work with raw Shadowsocks |
-| Change network/region | Tuning gains are marginal and the path lacks capacity | — |
+| 改发送端拥塞控制（BBR） | 第二步显示单流被压制，且路径有丢包、RTT 高 | 创造容量；修好客户端到 VPS 那段；保证上传提升 |
+| 入口加 CDN | 瓶颈在客户端到 VPS 这段，且传输是 HTTP 系 | 改变出口 IP；保证提速；给裸 Shadowsocks 用 |
+| 换网络或换区域 | 调优收益很小、路径确实没容量 | — |
 
-## Measurement discipline
+### BBR 的正确测法
 
-- Alternate control and treatment in one session (`C,T,T,C,C,T`) so time-of-day drift cancels.
-- Report the **median of several rounds**, never the best round.
-- Report overlapping ranges as "not established". Do not turn overlap into a percentage improvement.
-- State the sample count and the local time.
-- Separate download from upload. Server-side congestion control does not govern the client's sending side.
-- Never multiply two independently measured speedups. `BBR × CDN` was not measured.
+不要直接改全局设置，那会影响机器上每一条连接。优先在独立测试连接上用 `TCP_CONGESTION` 按 socket 设算法，全局保持原样。
 
-## Contamination check before measuring
+对照方法：
 
-If the test can be routed by TUN, system proxy, VPN, or a stale DNS cache, the number is not about the intended path. Bind to the physical interface or disable the interceptor for the test, and say which you did.
+- 交替顺序 `CUBIC, BBR, BBR, CUBIC, CUBIC, BBR`，抵消时段漂移；
+- 报多轮中位数，不报最好那一轮；
+- 上传常常没变化，因为服务器的算法管不到客户端的发送方向；
+- 区间重叠就写"未成立"，不要把重叠算成百分比提升。
 
-## Anti-patterns
+在差线路上，现实结果是提升几倍但仍然不快。照实说。
 
-Refuse these and explain why:
+### 测量前先排除污染
 
-- copying a sysctl block from a blog (buffers depend on bandwidth × RTT, RAM, concurrency, role);
-- changing MTU because "1440 is usual" (probe PMTU first);
-- rate-limiting on first retransmission (symptom, not cause);
-- enabling BBR globally as a "fix" (affects every connection on the box);
-- quoting one round as the result.
+如果测试可能被 TUN、系统代理、VPN 或 DNS 缓存改道，这个数字就不是关于目标路径的。绑物理网卡或在测试期间关掉拦截，并说明你做了哪一种。
 
-## Stop conditions
+## 反面做法
 
-Stop tuning and say so when:
+- 从博客抄一段 sysctl。缓冲区取决于带宽×RTT、内存、并发和机器角色。1 GB 内存设 256 MB 缓冲是负担。
+- 因为"一般都是 1440"就改 MTU。先探测 PMTU；MTU 错了会让某些路径静默卡死。
+- 一看到重传就限速。重传是症状，限速是叠加第二个问题。
+- 全局开 BBR 就算完成。它影响机器上每一条连接。
+- 只报最好的一轮。
+- 把两个独立测得的提速相乘。`BBR × CDN` 从未一起测过。
 
-- step 1 shows the server uplink is the limit (provider/hardware problem, not tuning);
-- step 2 shows single ≈ parallel (no capacity to recover);
-- the problem only appears at peak hours (congestion, not configuration);
-- measured gains are within the noise of overlapping ranges.
+## 停止条件
 
-## Output contract
+出现这些就停止调优并说明原因：
 
-```text
-SERVER_UPLINK=<B/s> errors=<n> drops=<n>
-SINGLE=<B/s>  PARALLEL_N=<n> TOTAL=<B/s>
-RTT=<ms> LOSS=<%> samples=<n> at=<local time>
-TCP_STATE=cwnd=<n> ssthresh=<n> retrans=<ratio>
-BOTTLENECK=<server uplink | single-flow congestion | path capacity | client network | undetermined>
-TREATMENT=<none | congestion control | CDN entry | network change>
-BEFORE_MEDIAN=<n> AFTER_MEDIAN=<n> ROUNDS=<n> RANGES_OVERLAP=<yes/no>
-UPLOAD_CHANGED=<yes/no/not measured>
-ENV_SPECIFIC=<what would not transfer to another ISP/hour>
-ROLLBACK=<restore path>
-UNVERIFIED=<peak hour, other devices, long-lived connections>
+- 第一步显示服务器上行是上限（服务商或硬件问题）；
+- 第二步显示单流 ≈ 多流（没有容量可恢复）；
+- 问题只在高峰出现（拥塞，不是配置）；
+- 测得收益落在区间重叠的噪声里。
+
+## 报告
+
+```
+服务器上行=<B/s> errors=<n> drops=<n>
+单流=<B/s>  并行N=<n> 合计=<B/s>
+RTT=<ms> 丢包=<%> 样本=<n>
+TCP状态=cwnd=<n> ssthresh=<n> 重传=<比例>
+瓶颈=<服务器上行 | 单流拥塞 | 路径容量 | 客户端网络 | 未确定>
+处理=<无 | 拥塞控制 | CDN入口 | 换网络>
+处理前中位数=<n> 处理后中位数=<n> 轮数=<n> 区间重叠=<是/否>
+上传是否变化=<是/否/未测>
+仅限本环境=<哪些结论换运营商或换时段就不成立>
+回滚=<怎么恢复>
+未验证=<高峰时段、其他设备、长连接>
 ```

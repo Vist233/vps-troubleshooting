@@ -1,66 +1,77 @@
-# Login blocked: decision rules
+# 登录失败：网站能开但登不上
 
-Human walkthrough with commands: [docs/04-login-blocked.md](../../../docs/04-login-blocked.md).
+隧道通了，不等于账号能用。用风控和验证挑战保护自己的网站，会把 IP 当成一个信号，而 VPS 地址是它们不喜欢的信号。
 
-This is a **reading-the-evidence** problem, not a bypass problem. There is no reliable technical bypass and this repository does not offer one.
+这一页讲的是怎么正确读证据，不是怎么绕过防护。没有可靠的技术绕过手段，仓库也不假装有。
 
-## Never merge these results
+## 第一步：你实际观察到了什么
 
-| Observation | Proves |
+下面这些是完全不同的结果，不能合并：
+
+| 观察 | 能证明什么 |
 | --- | --- |
-| API `401` unauthenticated | Requests arrive. **Nothing** about account usability |
-| API `200` authenticated | That call works from that exit |
-| Page `403` + challenge headers | A risk check is challenging. Not a transport failure |
-| Form fails repeatedly, page loads | Session/cookie/challenge, usually client-side |
-| CLI authorization error | Entitlement or challenge, not necessarily the tunnel |
+| 不带凭据请求 API 返回 `401` | 请求到达了 API，不代表账号能用 |
+| 带有效凭据请求 API 返回 `200` | 该账号从该出口可以做这次调用 |
+| 页面返回 `403` 并带挑战头 | 有风控在挑战客户端，不是网络故障 |
+| 页面能开但登录表单反复失败 | 会话、Cookie 或挑战问题，通常是客户端侧 |
+| CLI 工具报授权错误 | 账号权益或挑战问题，不一定是隧道 |
 
-The most common reporting error: treating `401` on an unauthenticated call as proof the site works through the node.
+最常见的报告错误："API 返回 401，所以 OpenAI 通过这个节点是通的。"并不通。`401` 是未认证请求的预期答案，它对真实登录能不能过什么都没说。
 
-## Exit vs entry
+## 第二步：出口是不是问题
 
-The destination scores the **exit**. A CDN changes the **entry**.
+目标网站看到的是出口地址，也就是 VPS。在 VPS 前面加 CDN 改变的是入口，不是出口。
 
-Therefore: fronting with a CDN, or switching transport, **does not change** what the destination sees. Only a different exit address or a different account/session does.
+- 加 CDN 不改变目标网站对地址的评分
+- 换传输方式（Shadowsocks → VLESS/WS）也不改变出口
+- 只有换出口地址，或换账号/会话，才改变目标网站看到的东西
 
-Verify the exit as the destination sees it (`curl https://api.ipify.org` through the proxy) and compare with the VPS address.
+按目标网站看到的样子核实出口：
 
-## Classify before recommending
-
-| Class | Signal | Honest options |
-| --- | --- | --- |
-| Transport | TCP/TLS fails | Fix path ([unreachable](unreachable.md)) |
-| Risk challenge | `403` + challenge, captcha, redirect loop | Different exit, residential/mobile path, or accept the limit |
-| Account/entitlement | Authenticated but refused; quota/region message | Account side; network changes do not help |
-
-Third-party risk scores are **signals**, not the destination's verdict. A "risk 66" does not mean "66% clean" or "will be blocked". Never present one as a conclusion.
-
-## Escalation order
-
-1. Real browser, signed in, on the user's own device. Cheapest, most conclusive.
-2. A different exit (another VPS, or the user's home connection).
-3. A different hour.
-4. Accept the boundary and say the exit is unsuitable for that service.
-
-## Anti-patterns
-
-- Stacking another proxy hop to "fix" it (changes latency, not exit identity).
-- Calling a challenge a ban.
-- Citing a third-party score as authoritative.
-- Declaring success from a partial signal.
-- Building or advising challenge bypasses. Explaining signals is diagnosis; evading them is not.
-
-## Output contract
-
-```text
-EXIT_IP=<observed>  EXIT_MATCHES_VPS=<yes/no>
-API_UNAUTH=<status>          # reachability only
-API_AUTH=<status/result>     # requires user credentials
-SITE=<status> CHALLENGE_HEADERS=<present/absent>
-REAL_BROWSER_LOGIN=<user-verified yes/no/not attempted>
-THIRD_PARTY_RISK=<source> <value>   # signal, not verdict
-CLASS=<transport|risk challenge|account|undetermined>
-RECOMMENDATION=<...>
-UNVERIFIED=<...>
+```bash
+curl -s https://api.ipify.org    # 走代理
 ```
 
-The last line must stay honest. "Tunnel verified, real login not verified" is a complete result.
+和 VPS 自己的公网地址比对。一致说明出口就是这台 VPS，加 CDN 没改变这一点。
+
+## 第三步：区分三类失败
+
+| 类别 | 信号 | 现实可选项 |
+| --- | --- | --- |
+| 传输 | TCP/TLS 失败、超时、重置 | 修路径，见 [unreachable](unreachable.md) |
+| 风控挑战 | `403` + 挑战头、验证码、无限跳转 | 换出口地址、换住宅/移动网络，或接受限制 |
+| 账号/权益 | 认证通过但被拒、配额或地区提示 | 账号侧问题，换网络没用 |
+
+第三方的"IP 纯净度"或风险分只是第三方信号。它不是目标网站的评分，一个"risk 66"不代表"66% 干净"或"一定会被封"。不要当判决书用。
+
+## 第四步：可以诚实尝试的事
+
+1. 用真实浏览器、在用户自己设备上、登录状态下验证。大多数"被封了"的报告，其实是正常浏览器能通过的挑战。最便宜的测试，也最常直接结案。
+2. 换一个出口试。另一台不同机房的 VPS，或用户家里的网络。家里能通而 VPS 不通，出口就是变量。
+3. 换个时段试。风控判断和挑战频率随时间变化，某一刻失败不是永久判决。
+4. 接受边界。如果机房出口被持续挑战而用户需要稳定访问，诚实的答案是：这个出口不适合那个服务。
+
+## 不要做的事
+
+- 不要靠再套一层代理来"修"它。加跳数改变延迟，不改变出口身份。
+- 不要把挑战说成封号。`403` + 挑战意味着"证明你不是机器人"。
+- 不要把第三方评分当权威。
+- 不要用部分信号宣布成功。
+- 不要帮着绕过防护。解释信号是诊断，构造绕过不是。
+
+## 报告
+
+```
+出口IP=<走代理观察到的>
+出口是否等于VPS=<是/否>
+API未认证=<状态码>          # 401 是预期的，只证明可达
+API认证=<状态/结果>         # 需要用户的凭据
+网站=<状态码> 挑战头=<有/无>
+真实浏览器登录=<用户是否验证过：是/否/未尝试>
+第三方风险=<来源> <数值>    # 只是信号
+类别=<传输 | 风控挑战 | 账号 | 未确定>
+建议=<...>
+未验证=<...>
+```
+
+最后一行永远要诚实。"隧道已验证，真实登录未验证"是一个完整且有用的结果。
