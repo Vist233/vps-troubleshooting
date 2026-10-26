@@ -1,0 +1,19 @@
+# Credentials: a subscription file is a bearer credential
+subscription*.yaml
+subscription*.yml
+*.private.yaml
+*.private.yml
+secrets*
+*-token*
+*.token
+
+# Local scratch
+.DS_Store
+__pycache__/
+*.pyc
+tmp/
+*.log
+
+# Measurement output
+measure-*.json
+*.results.json
