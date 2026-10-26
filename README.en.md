@@ -4,15 +4,6 @@ When a remote VPS is slow, unreachable, or a site refuses to let you sign in, me
 
 Works with any VPS and any provider. Different datacenters and routes, same method.
 
-## What it covers
-
-- Decide whether the bottleneck is the server uplink, the cross-border path, or the client's own network
-- Decide whether "can't connect" means a dead service, a closed firewall, wrong DNS, or a filtered path
-- Decide whether enabling BBR is justified, and how to measure it as a real comparison
-- Decide what a CDN can and cannot improve
-- Locate why a multi-device subscription fails to load
-- Separate "the tunnel connects" from "the site is usable"
-
 ## Usage
 
 Send this to an AI agent:
@@ -23,6 +14,15 @@ and diagnose my VPS following its procedure. Read-only checks first.
 ```
 
 Without an AI, read the matching file under `skill/vps-troubleshooting/references/`. Each contains the commands and the criteria for interpreting them.
+
+## What it covers
+
+- Decide whether the bottleneck is the server uplink, the cross-border path, or the client's own network
+- Decide whether "can't connect" means a dead service, a closed firewall, wrong DNS, or a filtered path
+- Decide whether enabling BBR is justified, and how to measure it as a real comparison
+- Decide what a CDN can and cannot improve
+- Locate why a multi-device subscription fails to load
+- Separate "the tunnel connects" from "the site is usable"
 
 ## Symptoms
 
