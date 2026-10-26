@@ -18,7 +18,7 @@ Works with any VPS and any provider. Different datacenters and routes, same meth
 Send this to an AI agent:
 
 ```
-Read skill/vps-troubleshooting/SKILL.md from https://github.com/<owner>/vps-troubleshooting
+Read skill/vps-troubleshooting/SKILL.md from https://github.com/Vist233/vps-troubleshooting
 and diagnose my VPS following its procedure. Read-only checks first.
 ```
 

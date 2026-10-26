@@ -18,7 +18,7 @@
 把这句话发给 AI：
 
 ```
-读 https://github.com/<owner>/vps-troubleshooting 里的 skill/vps-troubleshooting/SKILL.md，
+读 https://github.com/Vist233/vps-troubleshooting 里的 skill/vps-troubleshooting/SKILL.md，
 按它的流程诊断我这台 VPS，先只做只读检查。
 ```
 
