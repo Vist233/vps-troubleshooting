@@ -101,9 +101,9 @@ gzip affects subscription download only, never proxy throughput.
 ```
 skill/vps-troubleshooting/SKILL.md      entry point for an AI: routing, evidence order, decision rules
 skill/vps-troubleshooting/references/   five branches with commands and criteria
-scripts/inspect.sh                 read-only host baseline
-scripts/measure.py                 alternating comparison; rejects unbalanced samples
-scripts/check-links.py             validates relative documentation links
+skill/vps-troubleshooting/scripts/inspect.sh   read-only host baseline
+skill/vps-troubleshooting/scripts/measure.py   alternating comparison; rejects unbalanced samples
+scripts/check-links.py                         validates relative links (repo maintenance, not part of the skill)
 ```
 
 `SKILL.md` stays short so only the relevant branch gets loaded.

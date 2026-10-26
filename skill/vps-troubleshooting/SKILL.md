@@ -47,6 +47,28 @@ Before measuring, check for contamination: TUN, system proxy, VPN, `ProxyCommand
 
 Load only the branch the current symptom needs.
 
+## Bundled tools
+
+Two scripts in this skill's `scripts/` directory replace work you would otherwise redo by hand. Run them instead of improvising the equivalent commands.
+
+- `scripts/inspect.sh` collects the read-only baseline every branch needs: OS and arch, listeners, proxy services, congestion control and qdisc, NIC errors and drops, default route, memory, failed units. Pipe it over SSH:
+
+  ```bash
+  ssh <host> 'bash -s' < scripts/inspect.sh
+  ```
+
+  It writes nothing. On a non-Linux host it says so instead of printing empty sections that look like findings.
+
+- `scripts/measure.py` runs an alternating control/treatment comparison and refuses to call unequal sample counts a result:
+
+  ```bash
+  python3 scripts/measure.py --url <object> --rounds C,T,T,C,C,T
+  ```
+
+  Exit codes: `0` comparable, `2` bad arguments, `3` every attempt failed, `4` unbalanced arms. Treat `4` as "no conclusion", not as a speedup.
+
+Use `inspect.sh` before recommending anything, and `measure.py` whenever you are about to claim a change helped. Do not restate their output as a conclusion the data does not support.
+
 ## Non-negotiable rules
 
 1. Separate the two directions. Client to VPS and VPS to destination are different links with different bottlenecks. Never merge them into one speed number.

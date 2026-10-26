@@ -19,7 +19,8 @@ Usage:
   python3 scripts/measure.py --url URL --rounds C,T,T,C,C,T --interface en0
   python3 scripts/measure.py --url URL --rounds C,T --proxy http://127.0.0.1:7890
 
-Exit codes: 0 ok, 2 bad arguments, 3 network failure on every attempt.
+Exit codes: 0 ok, 2 bad arguments, 3 network failure on every attempt,
+            4 comparison not usable (unbalanced arms or fewer than 3 samples per arm).
 """
 from __future__ import annotations
 
@@ -134,6 +135,11 @@ def main() -> int:
 
     counts = {arm: summary[arm]["samples"] for arm in distinct}
     comparable = len(set(counts.values())) == 1 and all(c > 0 for c in counts.values())
+    # Equal counts are not the same as enough counts: with one sample per arm the
+    # min and max are identical, so ranges can never overlap and a difference can
+    # look established when nothing was repeated.
+    min_samples = 3
+    thin = [arm for arm in distinct if 0 < counts[arm] < min_samples]
 
     if args.json:
         print(json.dumps({
@@ -155,10 +161,14 @@ def main() -> int:
         if not comparable:
             print("\nWARNING: arms have unequal sample counts; this is not a valid comparison.")
             print("         Rerun with a balanced alternating order.")
+        elif thin:
+            print("\nWARNING: fewer than %d samples for %s; one or two rounds cannot"
+                  % (min_samples, ", ".join(thin)))
+            print("         separate a real difference from run-to-run variance.")
         print("\nRanges that overlap mean the difference is not established.")
         print("This is one HTTP transfer, not a proxy throughput ceiling.")
 
-    return 0 if comparable else 4
+    return 0 if comparable and not thin else 4
 
 
 if __name__ == "__main__":
