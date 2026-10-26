@@ -103,8 +103,9 @@ skill/vps-troubleshooting/SKILL.md      给 AI 的入口：路由、证据顺序
 skill/vps-troubleshooting/references/   五个分支，含命令和判断标准
 skill/vps-troubleshooting/scripts/inspect.sh   只读采集主机状态
 skill/vps-troubleshooting/scripts/measure.py   交替对照测速，会拒绝不平衡样本
-scripts/check-links.py                         校验文档相对链接（仓库维护用，不属于 skill）
 ```
+
+`scripts/` 是给 AI 执行的，不用手动跑。
 
 `SKILL.md` 保持简短，只在需要时加载对应分支。
 

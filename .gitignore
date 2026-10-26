@@ -17,3 +17,6 @@ tmp/
 # Measurement output
 measure-*.json
 *.results.json
+
+# Local-only maintenance tool, not published
+scripts/

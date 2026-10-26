@@ -18,7 +18,6 @@ The core lives in `skill/vps-troubleshooting/`: `SKILL.md` is the entry point fo
 
 - [inspect.sh](skill/vps-troubleshooting/scripts/inspect.sh): read-only host baseline, changes nothing
 - [measure.py](skill/vps-troubleshooting/scripts/measure.py): alternating comparison, rejects unbalanced samples
-- [check-links.py](scripts/check-links.py): validates relative links (repo maintenance, not part of the skill)
 
 ## Key judgements
 

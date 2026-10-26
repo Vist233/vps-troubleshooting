@@ -103,8 +103,9 @@ skill/vps-troubleshooting/SKILL.md      entry point for an AI: routing, evidence
 skill/vps-troubleshooting/references/   five branches with commands and criteria
 skill/vps-troubleshooting/scripts/inspect.sh   read-only host baseline
 skill/vps-troubleshooting/scripts/measure.py   alternating comparison; rejects unbalanced samples
-scripts/check-links.py                         validates relative links (repo maintenance, not part of the skill)
 ```
+
+`scripts/` is for the agent to run, not for manual use.
 
 `SKILL.md` stays short so only the relevant branch gets loaded.
 
