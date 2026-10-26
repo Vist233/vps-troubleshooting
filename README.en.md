@@ -1,100 +1,101 @@
 # vps-troubleshooting
 
-When a remote VPS is slow, unreachable, or a site refuses to let you sign in, measure first and locate the failing layer before changing anything.
+When a VPS gets slow, refuses connections, or lets a page load but not a login, hand it to an AI that follows a fixed procedure: measure first, decide which layer is failing, and only then change anything.
 
-Works with any VPS and any provider. Different datacenters and routes, same method.
+Works with any VPS and any provider. Different datacenters, different routes, same method.
 
-## Usage
+**You do not need to know Linux or networking.** You only need to describe the symptom.
 
-Send this to an AI agent:
+## How to use
+
+Send this to any AI that can read a URL or a file (Claude Code, Codex, Cursor, pi):
 
 ```
 Read skill/vps-troubleshooting/SKILL.md from https://github.com/Vist233/vps-troubleshooting
 and diagnose my VPS following its procedure. Read-only checks first.
 ```
 
-Without an AI, read the matching file under `skill/vps-troubleshooting/references/`. Each contains the commands and the criteria for interpreting them.
+The AI starts with **read-only checks** and changes no configuration. Before any change it must show you the plan and the rollback, and you decide.
 
-## What it covers
+If you are comfortable on a command line, read the matching file under `skill/vps-troubleshooting/references/` directly. Each contains the commands and the criteria for interpreting them.
 
-- Decide whether the bottleneck is the server uplink, the cross-border path, or the client's own network
-- Decide whether "can't connect" means a dead service, a closed firewall, wrong DNS, or a filtered path
-- Decide whether enabling BBR is justified, and how to measure it as a real comparison
-- Decide what a CDN can and cannot improve
-- Locate why a multi-device subscription fails to load
-- Separate "the tunnel connects" from "the site is usable"
+## How it diagnoses
 
-## Symptoms
+You do not need to understand this, but it helps to know what the agent is doing:
 
-| Symptom | First step | Details |
+1. **Read-only baseline** — OS, open ports, kernel settings, NIC errors, failed services. Look, do not touch
+2. **Layered measurement** — measure the server's own speed first, then one connection, then several, and pin the problem to a layer
+3. **Controlled comparison** — before changing something, alternate between "changed" and "unchanged" instead of trusting a feeling
+4. **Options, not orders** — what each option can and cannot improve
+5. **You decide** — change it, roll it back, or do nothing
+
+### Symptom to branch
+
+| What you see | Check first | Details |
 | --- | --- | --- |
-| New host, nothing configured | Confirm OS, arch, used ports, then pick a transport | [deploy](skill/vps-troubleshooting/references/deploy.md) |
-| Works but slow | Measure the VPS's own speed first | [slow-path](skill/vps-troubleshooting/references/slow-path.md) |
-| Connection times out or resets | Check both firewalls, then the path | [unreachable](skill/vps-troubleshooting/references/unreachable.md) |
-| Site loads but login fails | Check the exit IP, then classify the rejection | [login-blocked](skill/vps-troubleshooting/references/login-blocked.md) |
-| Multiple devices, subscription won't load | Separate download failure from parse failure | [multi-device](skill/vps-troubleshooting/references/multi-device.md) |
+| New host, nothing configured | OS, arch, used ports, then pick a transport | [deploy](skill/vps-troubleshooting/references/deploy.md) |
+| Works, but slow | Measure the VPS's own speed first | [slow-path](skill/vps-troubleshooting/references/slow-path.md) |
+| Connection times out or resets | Both firewalls, then the path | [unreachable](skill/vps-troubleshooting/references/unreachable.md) |
+| Page loads but login fails | The exit IP, then classify the rejection | [login-blocked](skill/vps-troubleshooting/references/login-blocked.md) |
+| Multiple devices, subscription will not load | Separate download failure from parse failure | [multi-device](skill/vps-troubleshooting/references/multi-device.md) |
 
-## Measured case
+## Measured
 
-A Los Angeles VPS, client in Beijing on a mobile network. Numbers below come from following this repository's method.
+A Los Angeles VPS, client in Beijing on a mobile network. All data from the three steps, from following this repository's method rather than estimating.
 
-### Where the slowness was
+| Step | Measurement | Result | Meaning |
+| --- | --- | ---: | --- |
+| 1 Locate the layer | VPS to internet download | ~45 MB/s | Server uplink is not the bottleneck |
+| 1 Locate the layer | Single connection download | 14–15 KB/s | Three orders of magnitude below the server |
+| 1 Locate the layer | Four parallel connections | 51.5 KB/s total | Capacity exists; one flow is throttled |
+| 1 Locate the layer | RTT | ~195 ms | Long path, slow window growth |
+| 1 Locate the layer | Packet loss | 6.7%–20% | Intermittent loss collapses a loss-based algorithm |
+| 1 Locate the layer | cwnd during transfer | 1–3 MSS | Window collapsed |
+| 1 Locate the layer | Retransmission | ~15.7% | Real loss, not just latency |
+| 2 Change congestion control | CUBIC (median of three rounds) | 34.0 KB/s | Control arm |
+| 2 Change congestion control | BBR (median of three rounds) | 108.6 KB/s | About 3.19×, still not fast |
+| 3 Change the entry | Original node, direct | 1.075 MB/s | Control arm, Shadowsocks |
+| 3 Change the entry | New setup through Cloudflare | 1.592 MB/s | About 48% above the original node |
+| 3 Change the entry | Same protocol, direct to origin | 1.347 MB/s | About 18% above same-protocol direct |
 
-| Measurement | Result | Meaning |
-| --- | --- | --- |
-| VPS to internet download | ~45 MB/s | Server uplink is not the bottleneck |
-| Single stream | 14–15 KB/s | Three orders of magnitude below the server |
-| Four parallel streams | 51.5 KB/s total | Capacity exists; one flow is throttled |
-| RTT | ~195 ms | Long path, slow window growth |
-| Packet loss | 6.7%–20% | Intermittent loss collapses a loss-based algorithm |
-| cwnd during transfer | 1–3 MSS | Window collapsed |
-| Retransmission | ~15.7% | Real loss, not just latency |
+Steps 2 and 3 both alternated three rounds. The six BBR readings: CUBIC 34.0 / 29.8 / 42.4, BBR 110.9 / 104.2 / 108.6. Ranges overlapped in both steps, so these are medians and orders of magnitude, not fixed multiples.
 
-The gap between single and parallel streams is the core evidence here. Four streams totalling 51.5 KB/s while one stream gets 15 KB/s means capacity is available and the problem is per-connection congestion control, not bandwidth.
+**The key evidence is the single-versus-parallel gap in step 1**: four streams totalling 51.5 KB/s while one stream gets 15 KB/s means the link has headroom and the problem is per-connection congestion control, not bandwidth.
 
-### After enabling BBR
+The same table shows the other half of what measuring is for. BBR really did triple the throughput, **and 108 KB/s is still slow**, which proves this host is unsuitable as a primary egress. "The change worked" and "not worth pursuing further" can both be true.
 
-Alternating rounds, algorithm set per test connection only; global setting stayed CUBIC:
+## FAQ
 
-| Round | CUBIC | BBR |
-| --- | ---: | ---: |
-| 1 | 34.0 KB/s | 110.9 KB/s |
-| 2 | 29.8 KB/s | 104.2 KB/s |
-| 3 | 42.4 KB/s | 108.6 KB/s |
-| Median | 34.0 KB/s | 108.6 KB/s |
-| Upload (one each) | 705 KB/s | 719 KB/s |
+### I know nothing about this. Can I still use it?
 
-About 3.19× on download, but 108 KB/s is still not fast. Upload barely moved, because the server's algorithm does not govern the client's sending side.
+Yes. Describe the symptom, for example "it crawls at night" or "pages spin but WeChat works fine". The AI does the investigating; you decide whether to change anything.
 
-### After fronting with Cloudflare
+### Will it break my server?
 
-Same 4 MiB object, alternating rounds:
+It starts read-only. Neither the baseline nor the measurement changes any configuration. Before a real change the procedure requires a stated rollback, one change at a time, and an immediate re-measure.
 
-| Path | Median |
-| --- | ---: |
-| Original Shadowsocks, direct | 1.075 MB/s |
-| New VLESS/WS through Cloudflare | 1.592 MB/s |
-| Same protocol, direct to origin | 1.347 MB/s |
+### How is this different from other AI skills?
 
-Cloudflare was ~48% above the original node and ~18% above the same protocol without it, with overlapping ranges across rounds. No fixed multiple can be promised, and it was sometimes slower.
+Most VPS tooling hands you a set of "optimised" values or a one-shot script, reboots, and leaves you judging by feel.
 
-Plain HTTPS control: download 0.993 → 1.700 MB/s, upload 543 → 497 KB/s.
+The difference here is **measure, then decide**:
 
-### Subscription delivery
+- Claims have an evidence bar. A comparison must alternate arms with at least three samples each. Run one test and announce a "3× speedup" and the bundled script refuses to conclude
+- It states what it cannot do. A CDN changes the entry but not the exit IP; BBR improves the sending side but creates no capacity
+- It draws boundaries instead of making promises. No provider recommendations, no shared nodes, no protocol rankings
 
-| Item | Value |
-| --- | --- |
-| Raw size | ~2.53 MB, 121,344 rules |
-| After gzip | ~558 KB |
-| Fetch time | ~180 s → ~42 s |
+If what you want is one command that fixes everything, this repository is not that.
 
-gzip affects subscription download only, never proxy throughput.
+### Can I just copy a set of recommended kernel settings?
 
-### What this case does not show
+No. Buffer size depends on bandwidth times latency, memory, concurrency, and what the machine is for. Copying a 256 MB buffer onto a 1 GB host turns it into a liability.
 
-- Cloudflare changes the entry, not the exit; the exit IP is still that VPS, so site risk checks are unaffected
-- BBR improves the sending side; it creates no capacity and cannot rescue a path with no headroom
-- 108 KB/s means this datacenter on this route is unsuitable as a primary egress; changing protocols or tuning further will not fix it
+## Out of scope
+
+- No provider recommendations, no shared nodes, no protocol rankings
+- No `curl | sh` installer
+- No promise that any exit passes a third party's risk checks
+- "It works" is not the same as "it is secure"
 
 ## Layout
 
@@ -108,51 +109,6 @@ skill/vps-troubleshooting/scripts/measure.py   alternating comparison; rejects u
 `scripts/` is for the agent to run, not for manual use.
 
 `SKILL.md` stays short so only the relevant branch gets loaded.
-
-## Out of scope
-
-- No provider recommendations, no shared nodes, no protocol rankings
-- No `curl | sh` installer
-- No promise that any exit passes a third party's risk checks
-- Functional availability is not security hardening
-
-## FAQ
-
-### BBR is on and it is still slow. Why?
-
-BBR improves the sending side on a lossy path. If the limit is server uplink, path capacity, or peak-hour congestion, it does nothing. Measure single versus parallel streams: if they match, the path has no headroom and BBR cannot help.
-
-### One stream is slow but parallel streams are fine. What is that?
-
-The link has capacity and a single connection is being punished by loss. Check RTT and loss rate, then cwnd and retransmission during the transfer. Congestion control is a legitimate lever here.
-
-### The service is running but nothing can connect from outside.
-
-Usually the host firewall is open and the provider security group is closed. Check both, and test the port from outside with `nc` instead of reading either config.
-
-### Does adding a CDN fix site login problems?
-
-No. A CDN changes the entry path from client to VPS. The exit IP is unchanged, so the destination sees the same identity.
-
-### Why can't Shadowsocks be put behind a CDN?
-
-A CDN proxies HTTP-family traffic. Shadowsocks is raw TCP/UDP and cannot be layered onto it. Using a CDN requires an HTTP-family transport chosen before installation; changing later means reinstalling.
-
-### The subscription downloads but the client shows an empty node list.
-
-Separate download failure from parse failure. Download failure is network; parse failure is content or compatibility. The client may also apply its own override that injects fields the server never sent, in which case inspect the client's effective config. Ruleset size is one possible cause but cannot be concluded without client-side evidence.
-
-### Results differ every run. How do I tell whether a change helped?
-
-Alternate control and treatment in one session, for example `C,T,T,C,C,C,T`, and report medians over several rounds. If the ranges overlap, the difference is not established and must not be reported as a percentage improvement.
-
-### Can I just copy a sysctl tuning block?
-
-Better not. Buffer sizes depend on bandwidth times RTT, RAM, concurrency, and the host's role. A 256 MB buffer on a 1 GB box is a liability, not an optimization.
-
-### How is this different from the VPS tuning scripts online?
-
-Those scripts change parameters and restart services. This repository measures first and only then decides whether to change anything, and requires a rollback path. Many "optimizations" turn out to be unnecessary once measured.
 
 ## License
 
