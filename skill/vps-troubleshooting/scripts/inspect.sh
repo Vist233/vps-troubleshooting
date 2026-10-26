@@ -7,7 +7,7 @@
 #   bash scripts/inspect.sh                  # on the host itself
 #
 # Everything printed here is evidence for the checks described in
-# docs/02-slow.md and docs/03-unreachable.md.
+# references/slow-path.md and references/unreachable.md.
 
 set -u
 

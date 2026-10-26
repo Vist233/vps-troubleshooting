@@ -12,7 +12,7 @@ Design:
   - makes no changes to any system setting.
 
 This measures a single HTTP transfer. It does not measure a proxy protocol's
-behaviour, and it is not a bandwidth ceiling. See docs/02-slow.md.
+behaviour, and it is not a bandwidth ceiling. See references/slow-path.md.
 
 Usage:
   python3 scripts/measure.py --url URL --rounds C,T,T,C,C,T
