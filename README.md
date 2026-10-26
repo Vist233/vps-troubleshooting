@@ -1,4 +1,4 @@
-# vps-egress-ops
+# vps-troubleshooting
 
 一台远程 VPS 变慢、连不上、或者网站登不上时，用测量定位到具体哪一层，再决定改什么。
 
@@ -18,21 +18,21 @@
 把这句话发给 AI：
 
 ```
-读 https://github.com/<owner>/vps-egress-ops 里的 skill/vps-egress-ops/SKILL.md，
+读 https://github.com/<owner>/vps-troubleshooting 里的 skill/vps-troubleshooting/SKILL.md，
 按它的流程诊断我这台 VPS，先只做只读检查。
 ```
 
-不用 AI 的话，直接读 `skill/vps-egress-ops/references/` 下对应的文件，里面有命令和判断标准。
+不用 AI 的话，直接读 `skill/vps-troubleshooting/references/` 下对应的文件，里面有命令和判断标准。
 
 ## 症状和处理
 
 | 症状 | 先做什么 | 详细步骤 |
 | --- | --- | --- |
-| 新机器，还没配 | 确认系统、架构、已占端口，再定传输方式 | [deploy](skill/vps-egress-ops/references/deploy.md) |
-| 能用但慢 | 先测 VPS 自身速度，排除服务器问题 | [slow-path](skill/vps-egress-ops/references/slow-path.md) |
-| 连接超时或被重置 | 查两层防火墙，再查路径 | [unreachable](skill/vps-egress-ops/references/unreachable.md) |
-| 网站能开但登录失败 | 先看出口 IP 有没有变，再看是哪类拒绝 | [login-blocked](skill/vps-egress-ops/references/login-blocked.md) |
-| 多设备，订阅拉不下来 | 确认下载成功还是解析失败 | [multi-device](skill/vps-egress-ops/references/multi-device.md) |
+| 新机器，还没配 | 确认系统、架构、已占端口，再定传输方式 | [deploy](skill/vps-troubleshooting/references/deploy.md) |
+| 能用但慢 | 先测 VPS 自身速度，排除服务器问题 | [slow-path](skill/vps-troubleshooting/references/slow-path.md) |
+| 连接超时或被重置 | 查两层防火墙，再查路径 | [unreachable](skill/vps-troubleshooting/references/unreachable.md) |
+| 网站能开但登录失败 | 先看出口 IP 有没有变，再看是哪类拒绝 | [login-blocked](skill/vps-troubleshooting/references/login-blocked.md) |
+| 多设备，订阅拉不下来 | 确认下载成功还是解析失败 | [multi-device](skill/vps-troubleshooting/references/multi-device.md) |
 
 ## 实测案例
 
@@ -99,8 +99,8 @@ gzip 只影响订阅下载，不影响上网速度。
 ## 结构
 
 ```
-skill/vps-egress-ops/SKILL.md      给 AI 的入口：路由、证据顺序、判断规则
-skill/vps-egress-ops/references/   五个分支，含命令和判断标准
+skill/vps-troubleshooting/SKILL.md      给 AI 的入口：路由、证据顺序、判断规则
+skill/vps-troubleshooting/references/   五个分支，含命令和判断标准
 scripts/inspect.sh                 只读采集主机状态
 scripts/measure.py                 交替对照测速，会拒绝不平衡样本
 scripts/check-links.py             校验文档相对链接

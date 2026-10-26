@@ -43,7 +43,7 @@ def fetch(url: str, timeout: float, proxy: str | None) -> tuple[int, float]:
         handlers.append(urllib.request.ProxyHandler({}))
     opener = urllib.request.build_opener(*handlers)
 
-    request = urllib.request.Request(url, headers={"User-Agent": "vps-egress-ops/measure"})
+    request = urllib.request.Request(url, headers={"User-Agent": "vps-troubleshooting/measure"})
     started = time.monotonic()
     with opener.open(request, timeout=timeout) as response:
         total = 0

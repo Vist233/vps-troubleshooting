@@ -1,5 +1,5 @@
 ---
-name: vps-egress-ops
+name: vps-troubleshooting
 description: Diagnose and tune a remote VPS that is slow, unreachable, or failing to log in to a site, using read-only evidence before any change. Covers path diagnosis, congestion control, CDN-fronted ingress, subscription distribution, and client routing. Use when the user owns a VPS and wants it usable as a stable egress; not for buying servers, choosing providers, or obtaining nodes.
 ---
 

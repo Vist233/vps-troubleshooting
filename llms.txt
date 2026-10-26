@@ -1,18 +1,18 @@
-# vps-egress-ops
+# vps-troubleshooting
 
 > Layered diagnosis for a remote VPS that is slow, unreachable, or failing a site login. Measure before changing configuration. Works with any VPS and any provider.
 
-The core lives in `skill/vps-egress-ops/`: `SKILL.md` is the entry point for an AI agent, and each file under `references/` carries the commands and criteria for one branch.
+The core lives in `skill/vps-troubleshooting/`: `SKILL.md` is the entry point for an AI agent, and each file under `references/` carries the commands and criteria for one branch.
 
 ## Documentation
 
 - [README](README.md): capability list, measured case, FAQ (Chinese)
 - [English README](README.en.md): same content in English
-- [Deploy](skill/vps-egress-ops/references/deploy.md): bare host to a working egress, including transport choice
-- [Slow](skill/vps-egress-ops/references/slow-path.md): decide whether the bottleneck is the server, the path, or the client
-- [Unreachable](skill/vps-egress-ops/references/unreachable.md): layered checks for service, firewall, DNS, and path filtering
-- [Login blocked](skill/vps-egress-ops/references/login-blocked.md): separate transport failure, risk challenge, and account problems
-- [Multi-device](skill/vps-egress-ops/references/multi-device.md): subscription delivery, ruleset size, client troubleshooting
+- [Deploy](skill/vps-troubleshooting/references/deploy.md): bare host to a working egress, including transport choice
+- [Slow](skill/vps-troubleshooting/references/slow-path.md): decide whether the bottleneck is the server, the path, or the client
+- [Unreachable](skill/vps-troubleshooting/references/unreachable.md): layered checks for service, firewall, DNS, and path filtering
+- [Login blocked](skill/vps-troubleshooting/references/login-blocked.md): separate transport failure, risk challenge, and account problems
+- [Multi-device](skill/vps-troubleshooting/references/multi-device.md): subscription delivery, ruleset size, client troubleshooting
 
 ## Tools
 

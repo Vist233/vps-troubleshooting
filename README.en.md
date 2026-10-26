@@ -1,4 +1,4 @@
-# vps-egress-ops
+# vps-troubleshooting
 
 When a remote VPS is slow, unreachable, or a site refuses to let you sign in, measure first and locate the failing layer before changing anything.
 
@@ -18,21 +18,21 @@ Works with any VPS and any provider. Different datacenters and routes, same meth
 Send this to an AI agent:
 
 ```
-Read skill/vps-egress-ops/SKILL.md from https://github.com/<owner>/vps-egress-ops
+Read skill/vps-troubleshooting/SKILL.md from https://github.com/<owner>/vps-troubleshooting
 and diagnose my VPS following its procedure. Read-only checks first.
 ```
 
-Without an AI, read the matching file under `skill/vps-egress-ops/references/`. Each contains the commands and the criteria for interpreting them.
+Without an AI, read the matching file under `skill/vps-troubleshooting/references/`. Each contains the commands and the criteria for interpreting them.
 
 ## Symptoms
 
 | Symptom | First step | Details |
 | --- | --- | --- |
-| New host, nothing configured | Confirm OS, arch, used ports, then pick a transport | [deploy](skill/vps-egress-ops/references/deploy.md) |
-| Works but slow | Measure the VPS's own speed first | [slow-path](skill/vps-egress-ops/references/slow-path.md) |
-| Connection times out or resets | Check both firewalls, then the path | [unreachable](skill/vps-egress-ops/references/unreachable.md) |
-| Site loads but login fails | Check the exit IP, then classify the rejection | [login-blocked](skill/vps-egress-ops/references/login-blocked.md) |
-| Multiple devices, subscription won't load | Separate download failure from parse failure | [multi-device](skill/vps-egress-ops/references/multi-device.md) |
+| New host, nothing configured | Confirm OS, arch, used ports, then pick a transport | [deploy](skill/vps-troubleshooting/references/deploy.md) |
+| Works but slow | Measure the VPS's own speed first | [slow-path](skill/vps-troubleshooting/references/slow-path.md) |
+| Connection times out or resets | Check both firewalls, then the path | [unreachable](skill/vps-troubleshooting/references/unreachable.md) |
+| Site loads but login fails | Check the exit IP, then classify the rejection | [login-blocked](skill/vps-troubleshooting/references/login-blocked.md) |
+| Multiple devices, subscription won't load | Separate download failure from parse failure | [multi-device](skill/vps-troubleshooting/references/multi-device.md) |
 
 ## Measured case
 
@@ -99,8 +99,8 @@ gzip affects subscription download only, never proxy throughput.
 ## Layout
 
 ```
-skill/vps-egress-ops/SKILL.md      entry point for an AI: routing, evidence order, decision rules
-skill/vps-egress-ops/references/   five branches with commands and criteria
+skill/vps-troubleshooting/SKILL.md      entry point for an AI: routing, evidence order, decision rules
+skill/vps-troubleshooting/references/   five branches with commands and criteria
 scripts/inspect.sh                 read-only host baseline
 scripts/measure.py                 alternating comparison; rejects unbalanced samples
 scripts/check-links.py             validates relative documentation links
