@@ -1,32 +1,32 @@
-# 慢：先定位瓶颈，再动手调
+# Slow: locate the bottleneck before tuning
 
-"慢"不是诊断结论。它至少是五种完全不同的故障，用户感觉起来一样。按成本从低到高逐项排除。
+"Slow" is not a diagnosis. It is at least five different failures that feel identical to the user. Separate them by measurement, cheapest first.
 
-## 判断树
+## Decision tree
 
 ```
-用户说：慢
+Reported: slow
   │
-  ├─ VPS 自己快不快？            → 从 VPS 直接测到公网
-  │    不快 → 服务器上行 / 服务商 / 硬件问题
-  │    快 ↓
+  ├─ Is the VPS itself fast?          → test VPS to internet directly
+  │    No  → server uplink / provider / hardware problem
+  │    Yes ↓
   │
-  ├─ 单流慢，但多流加起来正常？
-  │    是 → 拥塞控制 / 路径丢包        ← 调优可能有效
-  │    否 ↓
+  ├─ Is one stream slow but N streams fine?
+  │    Yes → congestion control / loss on the path   ← tuning can help
+  │    No  ↓
   │
-  ├─ 全天都慢吗？
-  │    不是 → 高峰期限速，调优解决不了容量
-  │    是 ↓
+  ├─ Is it slow at all hours?
+  │    No  → peak-hour congestion; tuning cannot add capacity
+  │    Yes ↓
   │
-  └─ 是不是客户端自己的网络到头了？   → 换个网络重测
+  └─ Is the client's own network the limit?  → change network, retest
 ```
 
-顺序是强制的。每一步都可能直接结案，而且便宜的那几步能排除最常见的错误猜测。
+The order is mandatory. Each step can end the investigation, and the cheap steps rule out the most common wrong guesses.
 
-## 第一步：服务器自己快不快
+## Step 1: is the server fast?
 
-从 VPS 测到附近、连接良好的目标，不要测到用户。
+Test from the VPS to a nearby, well-connected target. Never to the user.
 
 ```bash
 curl -o /dev/null -w '%{speed_download} B/s\n' \
@@ -34,109 +34,109 @@ curl -o /dev/null -w '%{speed_download} B/s\n' \
 ip -s link show
 ```
 
-怎么读：几十 MB/s 且 errors/drops 为 0，说明服务器上行不是瓶颈。用户看到的低速度发生在路径上，不在机器上。
+Reading it: tens of MB/s with zero errors and drops means the server's uplink is not the bottleneck. Whatever the user sees below that is happening on the path, not on the box.
 
-这一步排除最常见的错误猜测："VPS 太弱 / 服务商超售"。
+This eliminates the most common wrong guess: "the VPS is too weak" or "the provider oversold it".
 
-## 第二步：单流 vs 多流
+## Step 2: single stream versus parallel streams
 
-整个流程里信息量最大的一次测量，也是唯一能决定该不该调优的测量。
+The most informative measurement in the whole procedure, and the only one that decides whether tuning is justified.
 
-同一个文件下载两次：一次单流，一次 N 条并行。
+Download the same object twice: once as one stream, once as N parallel streams.
 
-- 单流 ≈ 多流总量 / N → 链路有容量，单条流被压制。拥塞控制、丢包或限速。调优有意义。
-- 单流 ≈ 多流总量 → 路径本身被限死。加并发没用，调优也没用。
+- single ≈ parallel total / N → the link has capacity and one flow is throttled. Congestion control, loss, or a shaper. Tuning is meaningful.
+- single ≈ parallel total → the path itself is capped. More streams will not help, and neither will tuning.
 
-实测过的一种情况：单流约 15 KB/s，四条并行合计约 51 KB/s。容量存在，是一条流被惩罚了。
+One observed case: a single stream at about 15 KB/s while four parallel streams totalled about 51 KB/s. The capacity existed; one flow was being punished.
 
-两个数字都要记。只报单流数字，会把人引向错误的修法。
+Record both numbers. Reporting only the single-stream figure invites the wrong fix.
 
-## 第三步：测真实路径的 RTT 和丢包
+## Step 3: RTT and loss on the real path
 
 ```bash
 ping -c 30 <vps>
-mtr -rwzc 30 <vps>     # 如果有
+mtr -rwzc 30 <vps>     # if available
 ```
 
-- RTT：决定带宽时延积。约 195 ms 意味着长路径，窗口增长很慢。
-- 丢包：5%–20% 的间歇丢包会打垮基于丢包的拥塞算法。这是长路径上单流速度极低的最常见原因。
-- 丢包从哪一跳开始：只在最后一跳出现，往往是 ICMP 限速而不是真丢包。要用 TCP 侧证据确认。
+- RTT decides the bandwidth-delay product. About 195 ms means a long path where the window grows slowly.
+- Loss: even 5% to 20% intermittent loss collapses a loss-based congestion algorithm. This is the usual cause of a tiny single-stream rate on a long path.
+- Where loss starts: `mtr` shows the hop. Loss appearing only at the final hop is often ICMP rate-limiting rather than real loss. Confirm with TCP-side evidence.
 
-跨境家宽线路同时出现高 RTT 和间歇丢包很常见。这是路径属性，不是配置错误。
+Cross-border consumer links routinely show both high RTT and intermittent loss. That is a property of the path, not a misconfiguration.
 
-## 第四步：用 TCP 状态确认
+## Step 4: confirm with TCP state
 
-光看吞吐分不清"路径差"和"服务器配错"。传输过程中在 VPS 上采样真实连接：
+Throughput alone cannot distinguish "bad path" from "misconfigured server". Sample the live connection on the VPS during a transfer:
 
 ```bash
-ss -tin dst <客户端IP>
+ss -tin dst <client-ip>
 ```
 
-| 字段 | 小/大意味着什么 |
+| Field | Meaning when small or large |
 | --- | --- |
-| `cwnd` | 传输中只有 1–3 MSS，说明窗口塌了，原因是丢包或限速 |
-| `ssthresh` | 掉到 2，说明反复发生丢包事件 |
-| `retrans` / `bytes_retrans` | 比例高（如约 15%）确认真实丢包，不只是延迟 |
-| `rtt` | 和 ping 不一致说明中间有东西在拦截 |
-| delivery rate | 服务器上行正常但它极低 → 路径问题 |
+| `cwnd` | 1 to 3 MSS during a transfer means the window collapsed, from loss or throttling |
+| `ssthresh` | Dropping to 2 means repeated loss events |
+| `retrans` / `bytes_retrans` | A high ratio, such as about 15%, confirms real loss rather than latency |
+| `rtt` | If it disagrees with ping, something is intercepting |
+| delivery rate | Very low while the server uplink is fine points at the path |
 
-这一步把"感觉慢"变成"在 195 ms 路径上，窗口塌到 1–3 MSS，重传率约 15%"。后者可操作，前者不可操作。
+This step turns "it feels slow" into "on a 195 ms path the window collapsed to 1 to 3 MSS with about 15% retransmission". The second statement is actionable; the first is not.
 
-## 处理手段（只在第一到四步指向路径之后）
+## Treatments, only after steps 1 to 4 point at the path
 
-| 手段 | 什么时候用 | 做不到什么 |
+| Treatment | When | What it cannot do |
 | --- | --- | --- |
-| 改发送端拥塞控制（BBR） | 第二步显示单流被压制，且路径有丢包、RTT 高 | 创造容量；修好客户端到 VPS 那段；保证上传提升 |
-| 入口加 CDN | 瓶颈在客户端到 VPS 这段，且传输是 HTTP 系 | 改变出口 IP；保证提速；给裸 Shadowsocks 用 |
-| 换网络或换区域 | 调优收益很小、路径确实没容量 | — |
+| Change the sender's congestion control (BBR) | Step 2 shows single-flow throttling, and the path has loss and high RTT | Create capacity, fix the client-to-VPS segment, guarantee upload gains |
+| Put a CDN in front of the entry | The client-to-VPS segment is the bottleneck and the transport is HTTP-family | Change the exit IP, guarantee a speedup, work with raw Shadowsocks |
+| Change network or region | Tuning gains are marginal and the path lacks capacity | n/a |
 
-### BBR 的正确测法
+### How to test BBR properly
 
-不要直接改全局设置，那会影响机器上每一条连接。优先在独立测试连接上用 `TCP_CONGESTION` 按 socket 设算法，全局保持原样。
+Do not change the global setting. It affects every connection on the box. Set the algorithm per socket on an isolated test connection and leave the global value alone.
 
-对照方法：
+Comparison method:
 
-- 交替顺序 `CUBIC, BBR, BBR, CUBIC, CUBIC, BBR`，抵消时段漂移；
-- 报多轮中位数，不报最好那一轮；
-- 上传常常没变化，因为服务器的算法管不到客户端的发送方向；
-- 区间重叠就写"未成立"，不要把重叠算成百分比提升。
+- alternate control and treatment, for example `CUBIC, BBR, BBR, CUBIC, CUBIC, BBR`, so time-of-day drift cancels;
+- report the median of several rounds, never the best round;
+- upload often does not change, because the server's algorithm does not govern the client's sending side;
+- if the ranges overlap, write "not established". Do not turn overlap into a percentage improvement.
 
-在差线路上，现实结果是提升几倍但仍然不快。照实说。
+On a bad path the realistic outcome is a few-fold improvement that is still not fast. Say that plainly.
 
-### 测量前先排除污染
+### Check for contamination before measuring
 
-如果测试可能被 TUN、系统代理、VPN 或 DNS 缓存改道，这个数字就不是关于目标路径的。绑物理网卡或在测试期间关掉拦截，并说明你做了哪一种。
+If TUN, a system proxy, a VPN, or a stale DNS cache can reroute the test, the number is not about the intended path. Bind to the physical interface or disable the interceptor for the test, and say which you did.
 
-## 反面做法
+## Anti-patterns
 
-- 从博客抄一段 sysctl。缓冲区取决于带宽×RTT、内存、并发和机器角色。1 GB 内存设 256 MB 缓冲是负担。
-- 因为"一般都是 1440"就改 MTU。先探测 PMTU；MTU 错了会让某些路径静默卡死。
-- 一看到重传就限速。重传是症状，限速是叠加第二个问题。
-- 全局开 BBR 就算完成。它影响机器上每一条连接。
-- 只报最好的一轮。
-- 把两个独立测得的提速相乘。`BBR × CDN` 从未一起测过。
+- Copying a sysctl block from a blog. Buffers depend on bandwidth times RTT, RAM, concurrency, and the host's role. A 256 MB buffer on a 1 GB box is a liability.
+- Changing MTU because "1440 is usual". Probe PMTU first; a wrong MTU silently stalls some paths.
+- Rate-limiting as soon as retransmissions appear. Retransmission is a symptom; capping throughput adds a second problem.
+- Enabling BBR globally and calling it done. It affects every connection on the box.
+- Reporting only the best round.
+- Multiplying two independently measured speedups. `BBR × CDN` was never measured together.
 
-## 停止条件
+## Stop conditions
 
-出现这些就停止调优并说明原因：
+Stop tuning and say so when:
 
-- 第一步显示服务器上行是上限（服务商或硬件问题）；
-- 第二步显示单流 ≈ 多流（没有容量可恢复）；
-- 问题只在高峰出现（拥塞，不是配置）；
-- 测得收益落在区间重叠的噪声里。
+- step 1 shows the server uplink is the limit, which is a provider or hardware problem;
+- step 2 shows single ≈ parallel, so there is no capacity to recover;
+- the problem appears only at peak hours, which is congestion rather than configuration;
+- measured gains fall inside overlapping ranges.
 
-## 报告
+## Report
 
 ```
-服务器上行=<B/s> errors=<n> drops=<n>
-单流=<B/s>  并行N=<n> 合计=<B/s>
-RTT=<ms> 丢包=<%> 样本=<n>
-TCP状态=cwnd=<n> ssthresh=<n> 重传=<比例>
-瓶颈=<服务器上行 | 单流拥塞 | 路径容量 | 客户端网络 | 未确定>
-处理=<无 | 拥塞控制 | CDN入口 | 换网络>
-处理前中位数=<n> 处理后中位数=<n> 轮数=<n> 区间重叠=<是/否>
-上传是否变化=<是/否/未测>
-仅限本环境=<哪些结论换运营商或换时段就不成立>
-回滚=<怎么恢复>
-未验证=<高峰时段、其他设备、长连接>
+SERVER_UPLINK=<B/s> errors=<n> drops=<n>
+SINGLE=<B/s>  PARALLEL_N=<n> TOTAL=<B/s>
+RTT=<ms> LOSS=<%> samples=<n>
+TCP_STATE=cwnd=<n> ssthresh=<n> retrans=<ratio>
+BOTTLENECK=<server uplink | single-flow congestion | path capacity | client network | undetermined>
+TREATMENT=<none | congestion control | CDN entry | network change>
+BEFORE_MEDIAN=<n> AFTER_MEDIAN=<n> ROUNDS=<n> RANGES_OVERLAP=<yes/no>
+UPLOAD_CHANGED=<yes/no/not measured>
+ENV_SPECIFIC=<what would not transfer to another ISP or hour>
+ROLLBACK=<restore path>
+UNVERIFIED=<peak hour, other devices, long-lived connections>
 ```

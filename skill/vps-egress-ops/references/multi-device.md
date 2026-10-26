@@ -1,83 +1,82 @@
-# 多设备：一个订阅，几个客户端
+# Multi-device: one subscription, several clients
 
-把一个配置发给手机、笔记本、平板，听起来简单，实际是支持时间消耗最多的地方。故障通常不在代理，而在订阅、客户端或规则集体积。
+Serving one configuration to a phone, a laptop, and a tablet sounds trivial and is where most support time disappears. The failures are usually in the subscription, the client, or the ruleset size, not in the proxy.
 
-## 只保留一个真相来源
+## One source of truth
 
-一个文件，一个 URL，所有设备共用。除非真的存在不兼容，不要维护"手机版"和"电脑版"。
+One file, one URL, every device. Do not maintain a "phone version" and a "laptop version" unless a real incompatibility forces it.
 
 ```
-/srv/clash/<token>.yaml   ← 唯一的配置
+/srv/clash/<token>.yaml   ← the only configuration
         │
-        ├── HTTPS (gzip)  → 设备 A
-        ├── HTTPS (gzip)  → 设备 B
-        └── HTTPS (gzip)  → 设备 C
+        ├── HTTPS (gzip)  → device A
+        ├── HTTPS (gzip)  → device B
+        └── HTTPS (gzip)  → device C
 ```
 
-好处：改节点只有一个地方，只有一个哈希要核对，不会漂移。某设备加载不了，那是要诊断的客户端问题，不是分叉配置的理由。
+One place to change a node, one hash to verify, no drift. If a device cannot load it, that is a client problem to diagnose, not a reason to fork the file.
 
-## 不要放进共享订阅的东西
+## What must not be in a shared subscription
 
-| 不要包含 | 原因 |
+| Do not include | Why |
 | --- | --- |
-| 绝对文件路径 | 只在写它的那台机器上有效 |
-| 具体网卡名（`en0`、`eth0`） | 设备相关 |
-| 写死的 CDN 边缘 IP | 会变；用域名 |
-| `tun`、DNS、`hosts` 设置 | 各平台各客户端都不同 |
-| 本地控制端口 | 会和客户端自己的冲突 |
+| Absolute filesystem paths | Valid only on the machine that wrote them |
+| A specific interface name such as `en0` or `eth0` | Device-specific |
+| Hardcoded CDN edge IPs | They change; use the hostname |
+| `tun`, DNS, or `hosts` blocks | Every platform and client differs |
+| A local controller port | Conflicts with the client's own |
 
-共享文件保持可移植，让每台设备自己设 DNS/TUN。
+Keep the shared file portable and let each device set its own DNS and TUN.
 
-## 规则集要小到能被加载
+## Ruleset size
 
-从几个公开来源拼出来的规则集可以到约 12 万条、约 2.5 MB YAML。桌面端无所谓。手机上，如果客户端有内存上限，这是"节点列表空白"或"加载失败"的一个可能原因。是可能，不是定论。没有客户端侧证据就不要当成原因。
+A ruleset assembled from public sources can reach about 120,000 entries and 2.5 MB of YAML. A desktop does not care. On a phone with a client memory ceiling, this is a plausible cause of a blank node list or a failed load. Plausible, not established. Do not assert it without client-side evidence.
 
-无论如何都可以做的：
+What is safe to do regardless:
 
-- 用 gzip 提供。约 2.5 MB 压到约 560 KB，实测拉取时间从约 180 秒降到约 42 秒。只影响下载，永远不影响代理吞吐。
-- 优先用编译后的规则集。Mihomo 的 MRS 是二进制格式，大集合加载比等价 YAML 快得多。
-- 合并没有理由存在的分组。如果 "Google"、"Gemini"、"Antigravity" 都指向同一个出口，它们就是一个组。
-- 永远不要把 `REJECT` 放在服务选择组的第一位。没有选择缓存的新设备会继承第一项，静默断网非常难查。
+- Serve it gzipped. About 2.5 MB compresses to about 560 KB, and an observed fetch time fell from about 180 seconds to about 42. This affects download only, never proxy throughput.
+- Prefer compiled rulesets. Mihomo's MRS is a binary format that loads far faster than equivalent YAML for large sets.
+- Merge groups that exist for no reason. If "Google", "Gemini", and "Antigravity" all point at the same exit, they are one group.
+- Never put `REJECT` first in a service selection group. A device with no cached selection inherits the first entry, and a silent block is very hard to diagnose.
 
-## 诊断"订阅拉下来了但节点列表空白"
+## Diagnosing "the subscription loads but the node list is empty"
 
-这是客户端侧症状，有几种可能。改服务器之前先区分：
+This is a client-side symptom with several possible causes. Distinguish them before changing the server.
 
-1. 下载成功了吗？用客户端的 User-Agent、在普通网络下拉一次。完整返回 YAML → 服务器没问题。
-2. 是拉取失败还是解析失败？超时是网络；带解析报错的加载失败是内容或兼容性。
-3. 客户端是不是自己叠了覆写？有些客户端会在订阅之上合并全局脚本或配置。那个覆写可能注入了服务器根本没发的字段。这时要看客户端实际生效的配置，不是服务器上的文件。
-4. 规则集对这个客户端是不是太大了？用裁剪版测一次，看体积是不是变量。这是诊断手段，不是要发布的版本。
-5. 同设备同网络，换个客户端行不行？行 → 问题是那个特定客户端。
+1. Did the download succeed? Fetch the URL with the client's User-Agent from a normal network. If it returns the YAML intact, the server is fine.
+2. Is it a fetch failure or a parse failure? A timeout means network; a load error with a parse message means content or compatibility.
+3. Does the client apply its own override? Some clients merge a global script or profile over the subscription. That override can inject fields the server never sent. Inspect the client's effective config, not the server file.
+4. Is the ruleset too large for this client? Test with a trimmed copy to see whether size is the variable. This is a diagnostic, not a shipped variant.
+5. Same device and network, different client, does it work? If yes, the problem is that specific client.
 
-做完这些才能说故障在哪。
+Only then can you name the failing layer.
 
-不要从一次失败断定"客户端坏了"，也不要因为另一台设备拉取成功就断定"配置没问题"。桌面端能拉，不代表手机能加载。
+Do not conclude "the client is broken" from one failure, and do not conclude "the config is fine" because a desktop fetched it. A desktop fetching successfully does not prove a phone can load it.
 
-## 选择组和预期管理
+## Selection semantics and expectations
 
-`select` 组是手动的，不会自动故障切换。
+A `select` group is manual and does not fail over.
 
-如果用户期待自动回退，需要 `url-test` 或 `fallback`，并且必须接受出口可能静默改变。说清楚这个订阅提供的是哪种行为。
+If the user expects automatic fallback they need `url-test` or `fallback`, and must accept that the exit may change silently. State which behavior the subscription provides.
 
-还要明确：几个组指向同一个节点不是冗余。只有一个出口时，每个组都解析到那个出口。
+Several groups pointing at one node is not redundancy. With one exit, every group resolves to that exit.
 
-## 以后加第二个入口
+## Adding a second entry later
 
-- 新导入应该默认选用户网络上实测更好的那个，先测，不要假设；
-- 已有设备可能保留上次的选择，要告诉用户手动切换；
-- 旧入口保持可用，直到新入口在真实设备上验证通过。
+- New imports should default to whichever entry measures better on the user's network. Measure, do not assume.
+- Existing devices may keep their previous selection, so tell the user to switch manually.
+- Keep the old entry working until the new one is verified from a real device.
 
-## 报告
+## Report
 
 ```
-订阅URL=<脱敏>                 # token 是凭据
-原始大小=<字节>  gzip后=<字节>
-外部拉取=<状态码> <秒数>
-SHA256=<哈希>
-节点数=<n>  组数=<n>  规则条目=<n>
-设备A=<客户端+版本> <结果>
-设备B=<客户端+版本> <结果>
-失败层=<服务器 | 下载 | 客户端解析 | 客户端覆写 | 规则集体积 | 未确定>
-可移植性排除=<你刻意没放进去的东西>
-未验证=<没测的设备或网络>
+SUBSCRIPTION_URL=<redacted>  SIZE_RAW=<bytes>  SIZE_GZIP=<bytes>
+FETCH_FROM_OUTSIDE=<status> <seconds>
+SHA256=<hash>
+PROXIES=<n> GROUPS=<n> RULESET_ENTRIES=<n>
+DEVICE_A=<client and version> <result>
+DEVICE_B=<client and version> <result>
+FAILING_LAYER=<server | download | client parse | client override | ruleset size | undetermined>
+PORTABILITY_EXCLUSIONS=<what you deliberately left out>
+UNVERIFIED=<devices or networks not tested>
 ```

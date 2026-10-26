@@ -1,119 +1,119 @@
-# 连不上：超时或连接被重置
+# Unreachable: connection times out or resets
 
-"连不上"至少有六种原因，分布在六层。大部分浪费时间的排查，都在修一层根本没坏的地方。
+"Can't connect" has at least six causes at six layers. Most wasted effort comes from fixing a layer that was never broken.
 
-## 检查顺序
+## Order of checks
 
-从便宜、最有决定性的开始。
+Cheapest and most decisive first.
 
 ```
-1. 服务在跑吗？              systemctl is-active
-2. 监听在对的地方吗？        ss -ltnp
-3. 两层防火墙都开了吗？      VPS 防火墙 + 服务商安全组
-4. VPS 自己能连自己吗？      从 VPS 连自己的端口
-5. 换个网络能连吗？          另一个运营商，或外部多点检测
-6. 是 IP 被封还是域名问题？  直连 IP vs 域名
-7. 传输层握手能完成吗？      TLS / WebSocket 握手
+1. Is the service running?          systemctl is-active
+2. Is it listening where expected?  ss -ltnp
+3. Are both firewalls open?         VPS firewall + provider security group
+4. Can the VPS reach itself?        connect from the VPS to its own port
+5. Can another network reach it?    a different ISP, or an external checker
+6. Is the IP blocked or the DNS?    direct IP versus domain
+7. Does the transport survive?      TLS / WebSocket handshake
 ```
 
-## 1–2. 服务和监听
+## 1 and 2: service and listener
 
 ```bash
-systemctl is-active <服务>
-systemctl status <服务> --no-pager -l | tail -20
-ss -ltnp | grep <端口>
+systemctl is-active <service>
+systemctl status <service> --no-pager -l | tail -20
+ss -ltnp | grep <port>
 ```
 
-绑定在 `127.0.0.1` 的服务收不到外部连接。但这可能是正确的，因为反向代理后面的入口本来就只监听回环。先确认这里是否应该有代理在前面，再决定要不要改成 `0.0.0.0`。
+A service bound to `127.0.0.1` cannot accept external connections. That may be correct, since a loopback-only ingress behind a reverse proxy is a deliberate design. Confirm whether a proxy is supposed to be in front before changing it to `0.0.0.0`.
 
-## 3. 两层防火墙
+## 3: two firewalls
 
 ```bash
 ufw status verbose
 nft list ruleset | head -40
 ```
 
-以及服务商控制台里的安全组。
+And the provider's security group in their console.
 
-只开主机防火墙、服务商那层没开，会得到一台看起来完美但永远不回应的服务器。这是新部署"装死了"最常见的原因。
+Opening only the host firewall while the provider blocks the port produces a server that looks perfect and never answers. This is the most common cause of a fresh deployment appearing dead.
 
-从外部实测：
-
-```bash
-nc -vz -w 5 <vps-ip> <端口>
-```
-
-## 4. 回环自测
-
-端口本地通、外部不通 → 问题在防火墙或服务商，不在代理配置：
+Test from outside:
 
 ```bash
-nc -vz -w 5 127.0.0.1 <端口>
+nc -vz -w 5 <vps-ip> <port>
 ```
 
-## 5. 换一个网络
+## 4: loopback sanity check
 
-一个网络不构成证据。单一运营商的超时，可能是那个运营商、那条路由，或者地址被封。
+The port answers locally but not externally, so the problem is firewall or provider, not the proxy config:
 
-- 换网络试（手机热点、另一个运营商）；
-- 用外部多点检测看是"到处都不通"还是"只有用户所在地区不通"；
-- 对比直连 IP 和域名：IP 通但域名不通 → 查 DNS；两个都不通 → 查路径。
+```bash
+nc -vz -w 5 127.0.0.1 <port>
+```
 
-做完这一步，才能说"这个地址在该地区被封"，而不是"它不能用"。
+## 5: another network
 
-## 6. 到底被封的是什么
+One network is not evidence. A timeout from a single ISP can be that ISP, that route, or a blocked address.
 
-| 观察 | 可能在哪层 |
+- Try a different network, such as a mobile hotspot or another ISP.
+- Use an external multi-location checker to see whether everywhere fails or only the user's region.
+- Compare direct IP against domain: if the IP works and the domain does not, look at DNS; if both fail, look at the path.
+
+Only after this can you say "the address is blocked from this region" rather than "it doesn't work".
+
+## 6: what exactly is blocked
+
+| Observation | Likely layer |
 | --- | --- |
-| 直连 IP 的 TCP 到处都连不上 | 端口被封，或服务/防火墙问题 |
-| 只有一个地区 TCP 连不上 | 该地区对地址或路由做了过滤 |
-| TCP 能连，TLS 握手卡住或重置 | 基于 SNI 的过滤，或证书/SNI 不匹配 |
-| TCP+TLS 正常，WebSocket 升级失败 | 反向代理的路径或头部配置错 |
-| 全都连上，但没有流量通过 | 代理凭据、UUID 或路径不匹配 |
+| TCP to the IP fails everywhere | Port blocked, or service and firewall |
+| TCP fails only from one region | Address or route filtered there |
+| TCP connects, TLS stalls or resets | SNI-based filtering, or certificate and SNI mismatch |
+| TCP and TLS fine, WebSocket upgrade fails | Reverse proxy path or header misconfiguration |
+| Everything connects, no traffic passes | Proxy credentials, UUID, or path mismatch |
 
-用 CDN 的域名去连源站 IP，如果报 `TLS alert internal error`，通常意味着源站期望流量是经过 CDN 到达的（或证书不覆盖那个名字）。不代表源站挂了。
+A `TLS alert internal error` when you connect to the origin IP using the CDN's hostname usually means the origin expects traffic that arrived through the CDN, or the certificate does not cover that name. It does not mean the origin is down.
 
-## 7. 路径里有 CDN 时
+## 7: a CDN in the path
 
 ```bash
-curl -sI https://<cdn域名>/does-not-exist        # 应为 404
-curl -sI https://<cdn域名>/<配置的ws路径>         # 不应是 404
+curl -sI https://<cdn-host>/does-not-exist        # should be 404
+curl -sI https://<cdn-host>/<configured-ws-path>  # should not be 404
 ```
 
-预期：未知路径 `404`，配置的路径不是 `404`（裸 `GET` 通常是 `400`，因为缺少升级头）。如果配置的路径也返回 `404`，说明反向代理没匹配上。
+Expected: unknown paths return `404`, and the configured path does not. A bare `GET` often returns `400` because it lacks the upgrade headers. If the configured path also returns `404`, the reverse proxy is not matching it.
 
-回源 TLS 模式：`Full` 加密到源站但不校验源站证书；`Full (strict)` 会校验。改模式时要限定到那一个域名，不要动整个 zone。
+Origin TLS mode: `Full` encrypts to the origin but does not validate the origin certificate; `Full (strict)` validates it. Scope a mode change to that one hostname, never the whole zone.
 
-## 最大的坑：把自己锁在外面
+## The biggest trap: locking yourself out
 
-改动任何影响路由、防火墙、SSH 或"你自己正在用的那条代理链路"之前：
+Before changing anything that affects routing, firewalls, SSH, or the proxy carrying your own connection:
 
-1. 确认有第二条独立入口（服务商控制台、串口控制台，或已开着的第二个 SSH 会话）；
-2. 确认改动可回滚，并且你知道确切的恢复命令；
-3. 如果你的 agent 会话是通过这个 VPS 连出去的，停下来，先让用户确认恢复访问的手段。
+1. Confirm a second independent entry exists, such as the provider console, a serial console, or an already-open second SSH session.
+2. Confirm the change is reversible and you know the exact restore command.
+3. If your agent session reaches the host through this VPS, stop and require the user to confirm recovery access first.
 
-一个切断了自己连接的 agent，既完不成任务，也回滚不了。这是硬停，不是提醒。
+An agent that cuts its own connection cannot finish the task and cannot roll back. Treat this as a hard stop.
 
-## 反面做法
+## Anti-patterns
 
-- 端口根本没开就去改代理配置。先查防火墙，免费且通常就是答案。
-- 用换协议来修端口被封。同地址上的新协议可能同样被过滤。先测地址。
-- 把"服务在跑"当成"服务可达"。`active` 只说明进程没退出。
-- 用一个网络判断可达性。
-- "测试一下"就关掉防火墙。开那个具体端口，不要拆掉防护。
+- Editing proxy config when the port was never open. Check the firewall first; it is free and usually the answer.
+- Changing protocol to fix a blocked port. A new protocol on the same address may also be filtered. Test the address first.
+- Treating "running" as "reachable". `active` only means the process did not exit.
+- Judging reachability from one network.
+- Disabling a firewall "to test". Open the specific port instead.
 
-## 报告
+## Report
 
 ```
-服务=<active/inactive>  监听=<地址:端口 或 无>
-主机防火墙=<怎么核实的>
-服务商防火墙=<怎么核实的 / 未知>
-回环=<通/不通>
-外部TCP=<通/不通>  来自=<网络>
-其他网络=<结果>
-直连IP=<通/不通>  域名=<通/不通>
-TLS握手=<通/不通>  WS升级=<通/不通>
-失败层=<服务 | 主机防火墙 | 服务商防火墙 | DNS | 路径过滤 | TLS/SNI | 代理配置>
-恢复入口=<你还能怎么进去>
-未验证=<测不到的部分>
+SERVICE=<active/inactive>  LISTENER=<addr:port or none>
+HOST_FIREWALL=<how verified>
+PROVIDER_FIREWALL=<how verified / unknown>
+LOOPBACK=<ok/fail>
+EXTERNAL_TCP=<ok/fail>  from=<network>
+OTHER_NETWORK=<result>
+DIRECT_IP=<ok/fail>  DOMAIN=<ok/fail>
+TLS_HANDSHAKE=<ok/fail>  WS_UPGRADE=<ok/fail>
+FAILING_LAYER=<service | host fw | provider fw | dns | path filter | tls/sni | proxy config>
+RECOVERY_ACCESS=<how you can still get in>
+UNVERIFIED=<what you could not test>
 ```

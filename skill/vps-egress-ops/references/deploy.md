@@ -1,41 +1,41 @@
-# 部署：从裸机到可用出口
+# Deploy: bare host to a working egress
 
-一台新 VPS，装好一个代理，生成其他设备能拉取的订阅地址。不针对任何服务商。
+One proxy on a fresh VPS, plus a subscription URL other devices can fetch. No provider assumptions.
 
-## 1. 先看清这台机器
+## 1. Read the host before writing anything
 
-只读，不改任何东西。
+Read-only. Do this every time.
 
 ```bash
 hostnamectl; uname -m; head -3 /etc/os-release
-ss -ltnp                       # 谁占着端口
+ss -ltnp                       # who already owns the ports
 systemctl list-units --type=service --state=running --no-pager | head -40
 ```
 
-记下：系统版本、架构、已占用端口、是不是专用机器。
+Record: OS and version, arch, occupied ports, whether the box is dedicated.
 
-出现这些情况先停：机器上已有别人的业务；系统或架构不在所选代理程序支持范围内。要么适配，要么换专用机器，不要硬上。
+Stop if the box already runs services you do not own, or the OS or arch is outside what your chosen proxy binary supports. Adapt, or use a dedicated host. Do not force it.
 
-## 2. 先定传输方式，再动手装
+## 2. Pick the transport before installing
 
-这一步决定后面所有可能性，装完再想就来不及了。
+This decision constrains everything downstream. Changing it later means reinstalling.
 
-| 需求 | 传输方式 | 能不能套 CDN |
+| Need | Transport | CDN-frontable |
 | --- | --- | --- |
-| 最简单，开销低，TCP+UDP 都要 | Shadowsocks | **不能**（裸 TCP/UDP） |
-| 直连线路差，想借 CDN 改善入口 | VLESS/VMess/Trojan over WebSocket + TLS | **能**（HTTP 系） |
-| 长 RTT、丢包严重，不套 CDN | Hysteria2 / TUIC | 不能 |
-| 完全没有公网入站端口 | 隧道类方案 | — |
+| Simplest, low overhead, TCP and UDP | Shadowsocks | No, raw TCP/UDP |
+| Bad direct path, wants a CDN in front | VLESS/VMess/Trojan over WebSocket + TLS | Yes, HTTP-family |
+| Lossy long-RTT path, no CDN | Hysteria2 / TUIC | No |
+| No public inbound port at all | Tunnel-based | n/a |
 
-关键判断：如果用户的问题是"直连线路差"，纯 Shadowsocks 没有任何可优化的余地，因为没法在前面加 CDN。这时必须选 HTTP 系传输。这个决定要在安装前做，并把后果告诉用户。
+Key judgement: if the user's problem is a bad direct path, plain Shadowsocks leaves nothing to improve, because there is no way to put a CDN in front. An HTTP-family transport is required, and that choice belongs before installation. Tell the user the consequence.
 
-需要 UDP 时注意：HTTP 系过 CDN 只给 TCP。要保留非 CDN 入站承担 UDP。
+If UDP is needed: HTTP-family through a CDN gives TCP only. Keep a non-CDN inbound for UDP.
 
-## 3. 安装代理服务
+## 3. Install the proxy service
 
-从项目官方仓库或 release 安装，固定版本并记录。不要 `curl | sh` 一个没读过的安装脚本。
+Install from the project's official repository or release, pinned to a version you record. Do not pipe an installer from a URL you have not read.
 
-最小配置（端口按上一步决定）：
+Minimal inbound, port chosen in step 2:
 
 ```json
 {
@@ -47,7 +47,7 @@ systemctl list-units --type=service --state=running --no-pager | head -40
       "listen": "0.0.0.0",
       "listen_port": 8388,
       "method": "chacha20-ietf-poly1305",
-      "password": "<自己生成>"
+      "password": "<generate one>"
     }
   ],
   "outbounds": [{ "type": "direct", "tag": "direct" }],
@@ -55,38 +55,38 @@ systemctl list-units --type=service --state=running --no-pager | head -40
 }
 ```
 
-启动前校验：
+Validate before starting:
 
 ```bash
 sing-box check -c /etc/sing-box/config.json
 ```
 
-systemd 单元建议加 `Restart=on-failure`、`NoNewPrivileges=true`、`ProtectSystem=strict`、`ProtectHome=true`。含凭据的文件权限设 `0600`。
+Use a systemd unit with `Restart=on-failure`, `NoNewPrivileges=true`, `ProtectSystem=strict`, `ProtectHome=true`. Set mode `0600` on any file containing a credential.
 
-## 4. 防火墙有两层
+## 4. Two firewalls
 
-必须同时放开：
+Both must allow the port:
 
-1. VPS 自己的防火墙（`ufw` / `nftables` / `firewalld`）；
-2. 服务商控制台里的安全组 / 云防火墙。
+1. the VPS's own firewall (`ufw`, `nftables`, `firewalld`);
+2. the provider's security group or cloud firewall, in their console.
 
-只开一层，是"服务在跑但连不上"最常见的原因。
+Opening only one is the most common cause of a service that runs but never answers.
 
-从外部实测，不要相信任何一边的配置：
+Test from outside instead of trusting either config:
 
 ```bash
-nc -vz -w 5 <vps-ip> <端口>
+nc -vz -w 5 <vps-ip> <port>
 ```
 
-## 5. 发布订阅
+## 5. Publish a subscription
 
-用 HTTPS 提供 YAML，设备通过 URL 拉取。
+Serve YAML over HTTPS so devices can fetch it by URL.
 
 ```caddy
 sub.example.com {
     root * /srv/clash
     encode gzip
-    @subscription path /<足够长的随机token>.yaml
+    @subscription path /<long-random-token>.yaml
     handle @subscription {
         header Content-Type "text/yaml; charset=utf-8"
         file_server
@@ -95,49 +95,49 @@ sub.example.com {
 }
 ```
 
-- token 就是凭据。拿到 URL 的人就能用你的节点。当密钥对待，不要提交到 Git。
-- `encode gzip` 显著缩短大规则集的下载时间，只影响下载，不影响上网速度。
-- 其他路径一律 `404`，不要开目录浏览。
+- The token is the credential. Anyone with the URL has your node. Treat it as a secret; never commit it.
+- `encode gzip` cuts fetch time on a large ruleset substantially. It affects download only, never proxy throughput.
+- Return `404` for every other path. Do not expose a directory listing.
 
-从外部验证并记录哈希：
+Verify from outside and record the hash:
 
 ```bash
 curl -sI -H 'Accept-Encoding: gzip' "https://sub.example.com/<token>.yaml"
 curl -s  -H 'Accept-Encoding: gzip' "https://sub.example.com/<token>.yaml" | gzip -dc | sha256sum
 ```
 
-## 6. 按顺序验收
+## 6. Verify in order
 
-每一步证明的东西不同，不要跳。
+Each step proves a different thing. Do not skip ahead.
 
-| 检查 | 证明什么 |
+| Check | Proves |
 | --- | --- |
-| `systemctl is-active` | 进程没退出 |
-| `ss -ltnp` 看到端口 | 监听在你以为的地方 |
-| 本机连这个端口 | 监听器接受连接 |
-| 客户端连上后出口 IP 是 VPS | 隧道端到端通了 |
-| 目标网站返回 204/200 | 真实流量到了互联网 |
-| 从外部能拉到订阅 | 其他设备真的能拿到 |
+| `systemctl is-active` | The process did not exit |
+| `ss -ltnp` shows the port | It is bound where you think |
+| Local connect to the port | The listener accepts |
+| Client connects and exits with the VPS IP | The tunnel works end to end |
+| Destination returns 204/200 | Real traffic reaches the internet |
+| Subscription fetchable from outside | Other devices can actually get it |
 
-只有最后两项对用户有意义。服务状态是绿的，不等于交付了可用节点。
+Only the last two matter to the user. A green service status is not a delivered node.
 
-## 停止条件
+## Stop conditions
 
-- 机器上已有不属于你的服务；
-- 系统或架构不受支持；
-- 开端口会暴露无关服务；
-- 你和用户都无法从外部验证端口。
+- The box runs services you do not own.
+- The OS or arch is unsupported.
+- Opening the port would expose an unrelated service.
+- Neither you nor the user can verify the port from outside.
 
-## 报告
+## Report
 
 ```
-主机=<系统/架构/是否专用>
-传输=<选择>  可套CDN=<是/否>
-理由=<为什么这个传输方式适合用户的实际问题>
-监听=<地址:端口>
-主机防火墙=<怎么核实的>
-服务商防火墙=<怎么核实的 / 未知>
-订阅URL=<脱敏>  SHA256=<哈希>
-已验证=<六项中通过了哪些>
-未验证=<线路速度、客户端可达性、网站登录>
+HOST=<os/arch/dedicated?>
+TRANSPORT=<chosen>  CDN_FRONTABLE=<yes/no>
+REASON=<why this transport fits the user's actual problem>
+LISTENER=<addr:port>
+HOST_FIREWALL=<how verified>
+PROVIDER_FIREWALL=<how verified / unknown>
+SUB_URL=<redacted>  SHA256=<hash>
+VERIFIED=<which of the six checks passed>
+NOT_VERIFIED=<path speed, client reachability, site login>
 ```

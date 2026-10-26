@@ -1,30 +1,30 @@
 # vps-egress-ops
 
-> 远程 VPS 变慢、连不上、网站登录失败时的分层诊断方法。先测量再改配置，适用于任何 VPS 和服务商。
+> Layered diagnosis for a remote VPS that is slow, unreachable, or failing a site login. Measure before changing configuration. Works with any VPS and any provider.
 
-核心内容在 `skill/vps-egress-ops/`：`SKILL.md` 是给 AI 的入口，`references/` 下五个分支各自包含命令和判断标准。
+The core lives in `skill/vps-egress-ops/`: `SKILL.md` is the entry point for an AI agent, and each file under `references/` carries the commands and criteria for one branch.
 
-## 文档
+## Documentation
 
-- [README](README.md): 能力范围、实测案例、常见问题
+- [README](README.md): capability list, measured case, FAQ (Chinese)
 - [English README](README.en.md): same content in English
-- [部署](skill/vps-egress-ops/references/deploy.md): 裸机到可用出口，含传输方式选择
-- [慢](skill/vps-egress-ops/references/slow-path.md): 判断瓶颈在服务器、线路还是客户端
-- [连不上](skill/vps-egress-ops/references/unreachable.md): 服务、防火墙、DNS、路径过滤的分层排查
-- [登录失败](skill/vps-egress-ops/references/login-blocked.md): 区分传输问题、风控挑战和账号问题
-- [多设备](skill/vps-egress-ops/references/multi-device.md): 订阅分发、规则集体积、客户端排错
+- [Deploy](skill/vps-egress-ops/references/deploy.md): bare host to a working egress, including transport choice
+- [Slow](skill/vps-egress-ops/references/slow-path.md): decide whether the bottleneck is the server, the path, or the client
+- [Unreachable](skill/vps-egress-ops/references/unreachable.md): layered checks for service, firewall, DNS, and path filtering
+- [Login blocked](skill/vps-egress-ops/references/login-blocked.md): separate transport failure, risk challenge, and account problems
+- [Multi-device](skill/vps-egress-ops/references/multi-device.md): subscription delivery, ruleset size, client troubleshooting
 
-## 工具
+## Tools
 
-- [inspect.sh](scripts/inspect.sh): 只读采集主机状态，不改任何配置
-- [measure.py](scripts/measure.py): 交替对照测速，拒绝不平衡样本
-- [check-links.py](scripts/check-links.py): 校验文档相对链接
+- [inspect.sh](scripts/inspect.sh): read-only host baseline, changes nothing
+- [measure.py](scripts/measure.py): alternating comparison, rejects unbalanced samples
+- [check-links.py](scripts/check-links.py): validates relative documentation links
 
-## 关键判断
+## Key judgements
 
-- 单流慢而多流合计正常，说明是单连接拥塞控制问题，不是带宽不足
-- 加 CDN 改变入口，不改变出口 IP，因此不解决网站风控
-- 裸 Shadowsocks 无法套 CDN，需要 HTTP 系传输，必须在安装前决定
-- BBR 改善发送侧，不创造容量，修不好没有余量的路径
-- 主机防火墙和服务商安全组是两层，只开一层是"服务在跑但连不上"的常见原因
-- API 未认证返回 401 只证明可达，不证明账号能用
+- A single slow stream alongside fast parallel streams means per-connection congestion control, not insufficient bandwidth
+- A CDN changes the entry, not the exit IP, so it does not resolve a site's risk checks
+- Raw Shadowsocks cannot be fronted by a CDN; an HTTP-family transport must be chosen before installation
+- BBR improves the sending side, creates no capacity, and cannot rescue a path with no headroom
+- The host firewall and the provider security group are two layers; opening one is a common cause of a running but unreachable service
+- An unauthenticated API `401` proves reachability only, not that an account works
